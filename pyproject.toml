@@ -4,11 +4,11 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "bmopso-ce"
-version = "1.0.0"
+version = "1.0.1"
 description = "Binary Multi-Objective Particle Swarm Optimization with Catfish Effect (BMOPSO-CE) for pymoo"
 readme = "README.md"
 requires-python = ">=3.9"
-license = { text = "MIT" }
+license = { text = "Apache-2.0" }
 authors = [
     { name = "Luciano Soares de Souza", email = "43418124+luciano-professor@users.noreply.github.com" }
 ]
