@@ -13,6 +13,7 @@ from bmopso_ce.util import (
     AdaptiveGrid,
     NonDominatedArchive,
     dominates,
+    dominates_mask,
     find_non_dominated_constrained,
 )
 
@@ -31,6 +32,50 @@ def test_dominance_rules_isolated() -> None:
     assert dominates(np.array([1.0, 2.0]), np.array([2.0, 3.0]), cv1=0.0, cv2=0.0) is True
     assert dominates(np.array([2.0, 3.0]), np.array([1.0, 2.0]), cv1=0.0, cv2=0.0) is False
     assert dominates(np.array([1.0, 3.0]), np.array([2.0, 2.0]), cv1=0.0, cv2=0.0) is False
+
+
+def test_dominates_mask_matches_scalar_dominates() -> None:
+    """Vectorized constrained-dominance must match the scalar Deb (2002) rules."""
+    rng = np.random.default_rng(7)
+    n = 40
+    f1 = rng.uniform(0.0, 10.0, size=(n, 3))
+    f2 = rng.uniform(0.0, 10.0, size=(n, 3))
+    cv1 = rng.choice([0.0, 0.2, 0.8], size=n)
+    cv2 = rng.choice([0.0, 0.2, 0.8], size=n)
+
+    mask = dominates_mask(f1, f2, cv1, cv2)
+    expected = np.array(
+        [dominates(f1[i], f2[i], float(cv1[i]), float(cv2[i])) for i in range(n)],
+        dtype=bool,
+    )
+    assert np.array_equal(mask, expected)
+
+
+def test_compute_grid_coordinates_matches_per_objective_loop() -> None:
+    """Vectorized grid mapping must match the original per-objective formula."""
+    grid = AdaptiveGrid(n_grid=12)
+    rng = np.random.default_rng(3)
+    f = rng.uniform(0.0, 50.0, size=(25, 4))
+    f[:5, 2] = 7.5  # degenerate objective column
+
+    coords = grid.compute_grid_coordinates(f)
+
+    expected = np.zeros_like(coords)
+    f_min = np.min(f, axis=0)
+    f_max = np.max(f, axis=0)
+    for m in range(f.shape[1]):
+        range_m = float(f_max[m] - f_min[m])
+        if range_m == 0.0:
+            expected[:, m] = grid.n_grid // 2
+        else:
+            buffer = range_m / (2.0 * grid.n_grid)
+            lower_bound = f_min[m] - buffer
+            upper_bound = f_max[m] + buffer
+            cell_width = (upper_bound - lower_bound) / grid.n_grid
+            c = np.floor((f[:, m] - lower_bound) / cell_width).astype(int)
+            expected[:, m] = np.clip(c, 0, grid.n_grid - 1)
+
+    assert np.array_equal(coords, expected)
 
 
 def test_adaptive_grid_isolated() -> None:
@@ -137,6 +182,42 @@ def test_pbest_update_coello_rules() -> None:
     # Candidate 1 must NOT replace pbest 1
     assert np.array_equal(new_x[1], [False, True])
     assert np.array_equal(new_f[1], [2.0, 8.0])
+
+
+def test_pbest_update_matches_scalar_loop() -> None:
+    """Vectorized pbest update must match the per-particle Coello Coello (2004) loop."""
+    rng = np.random.default_rng(11)
+    n_particles, n_var, n_obj = 16, 5, 2
+    pbest_x = rng.integers(0, 2, size=(n_particles, n_var)).astype(bool)
+    pbest_f = rng.uniform(0.0, 5.0, size=(n_particles, n_obj))
+    pbest_cv = rng.choice([0.0, 0.4], size=n_particles)
+    x = rng.integers(0, 2, size=(n_particles, n_var)).astype(bool)
+    f = rng.uniform(0.0, 5.0, size=(n_particles, n_obj))
+    cv = rng.choice([0.0, 0.4], size=n_particles)
+
+    rng_vec = np.random.default_rng(123)
+    vec_x, vec_f, vec_cv = update_personal_bests(
+        pbest_x, pbest_f, pbest_cv, x, f, cv, random_state=rng_vec
+    )
+
+    rng_ref = np.random.default_rng(123)
+    ref_x = pbest_x.copy()
+    ref_f = pbest_f.copy()
+    ref_cv = pbest_cv.copy()
+    for i in range(n_particles):
+        if dominates(f[i], ref_f[i], float(cv[i]), float(ref_cv[i])):
+            ref_x[i] = x[i]
+            ref_f[i] = f[i]
+            ref_cv[i] = cv[i]
+        elif not dominates(ref_f[i], f[i], float(ref_cv[i]), float(cv[i])):
+            if rng_ref.random() < 0.5:
+                ref_x[i] = x[i]
+                ref_f[i] = f[i]
+                ref_cv[i] = cv[i]
+
+    assert np.array_equal(vec_x, ref_x)
+    assert np.array_equal(vec_f, ref_f)
+    assert np.array_equal(vec_cv, ref_cv)
 
 
 def test_archive_class_lifecycle() -> None:

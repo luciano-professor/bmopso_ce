@@ -34,7 +34,11 @@ __all__ = [
 ]
 
 
-def select_random_particles(n_particles: int, n_to_replace: int) -> np.ndarray:
+def select_random_particles(
+    n_particles: int,
+    n_to_replace: int,
+    random_state: np.random.Generator | None = None,
+) -> np.ndarray:
     """Randomly select particle indices from the current swarm for catfish replacement.
 
     Because an External Archive (EA) preserves all best non-dominated solutions,
@@ -47,20 +51,23 @@ def select_random_particles(n_particles: int, n_to_replace: int) -> np.ndarray:
         Total number of particles in the swarm.
     n_to_replace : int
         Number of particles to replace.
+    random_state : np.random.Generator | None, default=None
+        NumPy Generator used to sample particle indices.
 
     Returns
     -------
     np.ndarray
         Array of selected particle indices without replacement.
     """
+    rng = random_state if random_state is not None else np.random.default_rng()
     n_to_replace = min(max(1, n_to_replace), n_particles)
-    return np.random.choice(n_particles, size=n_to_replace, replace=False)
+    return rng.choice(n_particles, size=n_to_replace, replace=False)
 
 
 def generate_extreme_binary_positions(
     n_positions: int,
     n_var: int,
-    rng: np.random.Generator | None = None,
+    random_state: np.random.Generator | None = None,
 ) -> np.ndarray:
     """Generate extreme binary positions for catfish particles.
 
@@ -75,18 +82,16 @@ def generate_extreme_binary_positions(
         Number of extreme binary vectors to generate.
     n_var : int
         Number of binary decision variables (bits).
-    rng : np.random.Generator | None, default=None
-        NumPy random number generator. If None, uses default np.random.
+    random_state : np.random.Generator | None, default=None
+        NumPy Generator used to draw the per-particle extreme-point coin flip.
 
     Returns
     -------
     np.ndarray
         Array of boolean extreme binary vectors of shape (n_positions, n_var).
     """
-    if rng is not None:
-        r = rng.random(n_positions)
-    else:
-        r = np.random.random(n_positions)
+    rng = random_state if random_state is not None else np.random.default_rng()
+    r = rng.random(n_positions)
 
     positions = np.zeros((n_positions, n_var), dtype=bool)
     # If r > 0.5: all dimensions set to 1. If r <= 0.5: all dimensions set to 0.
@@ -98,7 +103,7 @@ def generate_extreme_binary_positions(
 def apply_catfish_effect(
     x: np.ndarray,
     catfish_rate: float = 0.10,
-    rng: np.random.Generator | None = None,
+    random_state: np.random.Generator | None = None,
 ) -> np.ndarray:
     """Execute the Catfish Effect perturbation operator on a stagnated swarm.
 
@@ -111,25 +116,30 @@ def apply_catfish_effect(
         Current binary particle positions of shape (n_particles, n_var).
     catfish_rate : float, default=0.10
         Fraction of particles to be randomly replaced by catfish particles (default: 10%).
-    rng : np.random.Generator | None, default=None
-        Random number generator.
+    random_state : np.random.Generator | None, default=None
+        NumPy Generator used to choose particles and extreme positions.
 
     Returns
     -------
     np.ndarray
         Updated particle positions matrix of shape (n_particles, n_var).
     """
+    rng = random_state if random_state is not None else np.random.default_rng()
     n_particles, n_var = x.shape
     n_to_replace = max(1, int(round(catfish_rate * n_particles)))
 
     # 1. Randomly choose particles of current swarm to be replaced
-    selected_idx = select_random_particles(n_particles=n_particles, n_to_replace=n_to_replace)
+    selected_idx = select_random_particles(
+        n_particles=n_particles,
+        n_to_replace=n_to_replace,
+        random_state=rng,
+    )
 
     # 2. Generate extreme binary positions for the catfish particles based on r > 0.5 vs r <= 0.5
     new_catfish_x = generate_extreme_binary_positions(
         n_positions=len(selected_idx),
         n_var=n_var,
-        rng=rng,
+        random_state=rng,
     )
 
     # 3. Update ONLY particle positions (no re-evaluation, velocities preserved)

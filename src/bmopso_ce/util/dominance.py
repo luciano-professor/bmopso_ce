@@ -9,7 +9,44 @@ from __future__ import annotations
 import numpy as np
 from pymoo.util.nds.non_dominated_sorting import find_non_dominated
 
-__all__ = ["dominates", "find_non_dominated_constrained"]
+__all__ = ["dominates", "dominates_mask", "find_non_dominated_constrained"]
+
+
+def dominates_mask(
+    f1: np.ndarray,
+    f2: np.ndarray,
+    cv1: np.ndarray,
+    cv2: np.ndarray,
+) -> np.ndarray:
+    """Vectorized Constrained-Dominance test for paired solution batches (Deb, 2002).
+
+    Applies the same four rules as ``dominates`` independently to each row pair.
+
+    Parameters
+    ----------
+    f1 : np.ndarray
+        Objective matrix of the first solutions, shape (N, n_obj).
+    f2 : np.ndarray
+        Objective matrix of the second solutions, shape (N, n_obj).
+    cv1 : np.ndarray
+        Total constraint violations of the first solutions, shape (N,).
+    cv2 : np.ndarray
+        Total constraint violations of the second solutions, shape (N,).
+
+    Returns
+    -------
+    np.ndarray
+        Boolean mask of shape (N,) where True means the first solution dominates
+        the second under constrained dominance.
+    """
+    v1_viol = cv1 > 0.0
+    v2_viol = cv2 > 0.0
+
+    both_infeasible = v1_viol & v2_viol
+    both_feasible = (~v1_viol) & (~v2_viol)
+    pareto = np.all(f1 <= f2, axis=1) & np.any(f1 < f2, axis=1)
+
+    return ((~v1_viol) & v2_viol) | (both_infeasible & (cv1 < cv2)) | (both_feasible & pareto)
 
 
 def dominates(

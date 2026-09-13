@@ -64,6 +64,7 @@ class NonDominatedArchive:
         x: np.ndarray,
         f: np.ndarray,
         cv: np.ndarray | None = None,
+        random_state: np.random.Generator | None = None,
     ) -> bool:
         """Update archive with candidate solutions, filtering by dominance and pruning by hypercube density.
 
@@ -75,6 +76,8 @@ class NonDominatedArchive:
             Objective values matrix of shape (N, n_obj).
         cv : np.ndarray | None, default=None
             Total constraint violations of shape (N,). If None, defaults to 0.0.
+        random_state : np.random.Generator | None, default=None
+            NumPy Generator forwarded to hypercube-density pruning.
 
         Returns
         -------
@@ -112,6 +115,7 @@ class NonDominatedArchive:
                 f=non_dom_f,
                 cv=non_dom_cv,
                 max_size=self.max_size,
+                random_state=random_state,
             )
         else:
             self._x = non_dom_x
@@ -127,13 +131,19 @@ class NonDominatedArchive:
             return True
         return False
 
-    def select_leaders(self, n_particles: int) -> np.ndarray:
+    def select_leaders(
+        self,
+        n_particles: int,
+        random_state: np.random.Generator | None = None,
+    ) -> np.ndarray:
         """Select social leaders (gbest) for each particle via Adaptive Hypercube Grid Roulette.
 
         Parameters
         ----------
         n_particles : int
             Number of particles in the swarm.
+        random_state : np.random.Generator | None, default=None
+            NumPy Generator forwarded to hypercube roulette.
 
         Returns
         -------
@@ -143,7 +153,12 @@ class NonDominatedArchive:
         if self._x is None or self._f is None or len(self._x) == 0:
             raise RuntimeError("Cannot select leaders from an empty archive.")
 
-        return self.grid.select_leaders(self._x, self._f, n_particles)
+        return self.grid.select_leaders(
+            self._x,
+            self._f,
+            n_particles,
+            random_state=random_state,
+        )
 
     def get_hypercube_ids(self) -> np.ndarray:
         """Compute hypercube IDs of all solutions currently in the archive."""

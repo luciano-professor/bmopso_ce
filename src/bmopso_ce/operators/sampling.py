@@ -23,19 +23,25 @@ def sigmoid(v: np.ndarray) -> np.ndarray:
     return 1.0 / (1.0 + np.exp(-v))
 
 
-def sample_binary_positions(v: np.ndarray) -> np.ndarray:
+def sample_binary_positions(
+    v: np.ndarray,
+    random_state: np.random.Generator | None = None,
+) -> np.ndarray:
     """Sample boolean decision variables based on sigmoid velocity probabilities.
 
     Parameters
     ----------
     v : np.ndarray
         Continuous velocity matrix of shape (n_particles, n_var).
+    random_state : np.random.Generator | None, default=None
+        NumPy Generator used to draw uniform samples against sigmoid probabilities.
 
     Returns
     -------
     np.ndarray
         Boolean matrix of binary positions of shape (n_particles, n_var).
     """
+    rng = random_state if random_state is not None else np.random.default_rng()
     probs = sigmoid(v)
-    rand_matrix = np.random.rand(*v.shape)
+    rand_matrix = rng.random(v.shape)
     return rand_matrix < probs

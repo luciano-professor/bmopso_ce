@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "bmopso-ce"
-version = "1.0.1"
+version = "1.0.2"
 description = "Binary Multi-Objective Particle Swarm Optimization with Catfish Effect (BMOPSO-CE) for pymoo"
 readme = "README.md"
 requires-python = ">=3.9"

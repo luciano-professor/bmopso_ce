@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.2] - 2026-09-13
+
+### Changed
+- All algorithm draws now use pymoo's `self.random_state` (`np.random.Generator`) so `minimize(..., seed=s)` is reproducible.
+- Vectorized personal-best updates, grid coordinate mapping, and hypercube grouping without changing Coello/Deb rules.
+
+### Added
+- `dominates_mask` for batch constrained-dominance checks.
+- Reproducibility test: two independent `minimize(..., seed=42)` runs must match `X`, `F`, and `V`.
+
+---
+
 ## [1.0.1] - 2026-09-11
 
 ### Changed

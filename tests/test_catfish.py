@@ -53,7 +53,9 @@ def test_generate_extreme_binary_positions_with_rng() -> None:
             # First is > 0.5 (should be all 1s), second is <= 0.5 (should be all 0s)
             return np.array([0.75, 0.25])
 
-    positions = generate_extreme_binary_positions(n_positions=2, n_var=4, rng=MockRNG())
+    positions = generate_extreme_binary_positions(
+        n_positions=2, n_var=4, random_state=MockRNG()
+    )
     assert np.all(positions[0] == True)
     assert np.all(positions[1] == False)
 

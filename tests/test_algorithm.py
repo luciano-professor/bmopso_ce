@@ -164,6 +164,24 @@ def test_binary_mopso_optimization() -> None:
     assert np.all(np.sum(res.F, axis=1) == n_vars)
 
 
+def test_bmopso_ce_same_seed_is_reproducible() -> None:
+    """The same pymoo seed must reproduce X, F, and velocities across independent runs."""
+    problem = SimpleBinaryProblem(n_var=12)
+
+    def run(seed: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        algo = BMOPSO_CE(n_particles=16, w=0.5, c1=1.5, c2=1.5, n_grid=20)
+        res = minimize(problem, algo, termination=("n_gen", 6), seed=seed, verbose=False)
+        evolved = res.algorithm
+        assert res.X is not None and res.F is not None and evolved.V is not None
+        return res.X.copy(), res.F.copy(), evolved.V.copy()
+
+    x1, f1, v1 = run(42)
+    x2, f2, v2 = run(42)
+    assert np.array_equal(x1, x2)
+    assert np.allclose(f1, f2)
+    assert np.allclose(v1, v2)
+
+
 def test_adaptive_hypercube_grid_calculation() -> None:
     """Verify Adaptive Hypercube Grid coordinates and leader selection according to Coello Coello (2004)."""
     from bmopso_ce.util.grid import AdaptiveGrid

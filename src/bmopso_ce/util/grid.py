@@ -9,10 +9,67 @@ DOI: https://doi.org/10.1109/TEVC.2004.826067
 
 from __future__ import annotations
 
-from typing import Dict, List, Tuple
+from typing import List, Tuple
 import numpy as np
 
 __all__ = ["AdaptiveGrid"]
+
+
+def _unique_in_appearance_order(
+    ids: np.ndarray,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Return unique IDs in first-appearance order, inverse indices, and counts.
+
+    Parameters
+    ----------
+    ids : np.ndarray
+        1D integer identifiers of shape (N,).
+
+    Returns
+    -------
+    Tuple[np.ndarray, np.ndarray, np.ndarray]
+        unique IDs (K,), inverse index of each input (N,), and counts (K,).
+    """
+    unique_sorted, first_pos, inverse_sorted, counts_sorted = np.unique(
+        ids,
+        return_index=True,
+        return_inverse=True,
+        return_counts=True,
+    )
+    appearance_order = np.argsort(first_pos)
+    unique_ids = unique_sorted[appearance_order]
+    counts = counts_sorted[appearance_order]
+
+    remap = np.empty(len(appearance_order), dtype=int)
+    remap[appearance_order] = np.arange(len(appearance_order))
+    inverse = remap[inverse_sorted]
+    return unique_ids, inverse, counts
+
+
+def _grouped_member_indices(
+    inverse: np.ndarray,
+    counts: np.ndarray,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Pack member indices by group, preserving original order within each group.
+
+    Parameters
+    ----------
+    inverse : np.ndarray
+        Group index of each solution, shape (N,).
+    counts : np.ndarray
+        Population of each group, shape (K,).
+
+    Returns
+    -------
+    Tuple[np.ndarray, np.ndarray]
+        Concatenated member indices (N,) and start offset of each group (K,).
+    """
+    order = np.argsort(inverse, kind="stable")
+    starts = np.empty(len(counts), dtype=int)
+    starts[0] = 0
+    if len(counts) > 1:
+        np.cumsum(counts[:-1], out=starts[1:])
+    return order, starts
 
 
 class AdaptiveGrid:
@@ -59,25 +116,20 @@ class AdaptiveGrid:
         if n_points == 0:
             return np.empty((0, n_obj), dtype=int)
 
-        coords = np.zeros((n_points, n_obj), dtype=int)
         f_min = np.min(f, axis=0)
         f_max = np.max(f, axis=0)
+        range_m = f_max - f_min
+        zero_range = range_m == 0.0
 
-        for m in range(n_obj):
-            range_m = float(f_max[m] - f_min[m])
-            if range_m == 0.0:
-                # If all points share the same objective value, assign to center cell
-                coords[:, m] = self.n_grid // 2
-            else:
-                # Boundary buffer to ensure extreme points lie comfortably inside boundary cells
-                buffer = range_m / (2.0 * self.n_grid)
-                lower_bound = f_min[m] - buffer
-                upper_bound = f_max[m] + buffer
-                cell_width = (upper_bound - lower_bound) / self.n_grid
+        buffer = range_m / (2.0 * self.n_grid)
+        lower_bound = f_min - buffer
+        upper_bound = f_max + buffer
+        cell_width = (upper_bound - lower_bound) / self.n_grid
+        safe_width = np.where(zero_range, 1.0, cell_width)
 
-                c = np.floor((f[:, m] - lower_bound) / cell_width).astype(int)
-                coords[:, m] = np.clip(c, 0, self.n_grid - 1)
-
+        coords = np.floor((f - lower_bound) / safe_width).astype(int)
+        coords = np.clip(coords, 0, self.n_grid - 1)
+        coords[:, zero_range] = self.n_grid // 2
         return coords
 
     def get_hypercube_ids(self, f: np.ndarray) -> np.ndarray:
@@ -109,6 +161,7 @@ class AdaptiveGrid:
         x: np.ndarray,
         f: np.ndarray,
         n_particles: int,
+        random_state: np.random.Generator | None = None,
     ) -> np.ndarray:
         """Select social leaders (gbest) for swarm particles using Coello Coello (2004) Grid Roulette.
 
@@ -120,12 +173,15 @@ class AdaptiveGrid:
             Objective matrix in the archive of shape (N, n_obj).
         n_particles : int
             Number of particles requiring a leader.
+        random_state : np.random.Generator | None, default=None
+            NumPy Generator used for hypercube roulette and member draws.
 
         Returns
         -------
         np.ndarray
             Selected binary leader positions of shape (n_particles, n_var).
         """
+        rng = random_state if random_state is not None else np.random.default_rng()
         n_solutions = len(x)
         if n_solutions == 0:
             raise RuntimeError("Cannot select leaders from an empty archive.")
@@ -133,15 +189,10 @@ class AdaptiveGrid:
             return np.tile(x[0], (n_particles, 1))
 
         hypercube_ids = self.get_hypercube_ids(f)
+        unique_cubes, inverse, counts = _unique_in_appearance_order(hypercube_ids)
 
-        # Group solution indices by hypercube ID
-        cubes: Dict[int, List[int]] = {}
-        for idx, cube_id in enumerate(hypercube_ids):
-            cubes.setdefault(int(cube_id), []).append(idx)
-
-        unique_cubes = list(cubes.keys())
         # Fitness is inversely proportional to hypercube population: fitness_i = 10.0 / N_i
-        fitnesses = np.array([10.0 / len(cubes[cid]) for cid in unique_cubes], dtype=float)
+        fitnesses = 10.0 / counts.astype(float)
         total_fitness = float(np.sum(fitnesses))
 
         if total_fitness > 0.0:
@@ -150,14 +201,13 @@ class AdaptiveGrid:
             probs = np.full(len(unique_cubes), 1.0 / len(unique_cubes))
 
         # Select hypercubes via Roulette Wheel Selection
-        selected_cube_indices = np.random.choice(len(unique_cubes), size=n_particles, p=probs)
+        selected_cube_indices = rng.choice(len(unique_cubes), size=n_particles, p=probs)
 
-        # For each selected hypercube, choose one solution randomly (uniform random)
-        selected_leader_indices = np.zeros(n_particles, dtype=int)
-        for i, cube_idx in enumerate(selected_cube_indices):
-            cid = unique_cubes[cube_idx]
-            members = cubes[cid]
-            selected_leader_indices[i] = np.random.choice(members)
+        # For each selected hypercube, choose one solution uniformly at random
+        members, starts = _grouped_member_indices(inverse, counts)
+        selected_counts = counts[selected_cube_indices]
+        local_idx = (rng.random(n_particles) * selected_counts).astype(int)
+        selected_leader_indices = members[starts[selected_cube_indices] + local_idx]
 
         return x[selected_leader_indices]
 
@@ -167,6 +217,7 @@ class AdaptiveGrid:
         f: np.ndarray,
         cv: np.ndarray,
         max_size: int,
+        random_state: np.random.Generator | None = None,
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """Prune archive solutions when exceeding max capacity by targeting the most crowded hypercubes.
 
@@ -185,36 +236,38 @@ class AdaptiveGrid:
             Constraint violation array (N,).
         max_size : int
             Maximum allowable archive capacity.
+        random_state : np.random.Generator | None, default=None
+            NumPy Generator used to break crowded-hypercube ties.
 
         Returns
         -------
         Tuple[np.ndarray, np.ndarray, np.ndarray]
             Pruned (x, f, cv) arrays of length max_size.
         """
+        rng = random_state if random_state is not None else np.random.default_rng()
         num_to_remove = len(x) - max_size
         if num_to_remove <= 0:
             return x, f, cv
 
-        # 1. Compute grid and hypercube grouping once
+        # 1. Compute grid and hypercube grouping once (first-appearance cube order)
         hypercube_ids = self.get_hypercube_ids(f)
-        cubes: Dict[int, List[int]] = {}
-        for idx, cube_id in enumerate(hypercube_ids):
-            cubes.setdefault(int(cube_id), []).append(idx)
+        _, inverse, counts = _unique_in_appearance_order(hypercube_ids)
+        members, starts = _grouped_member_indices(inverse, counts)
+        cube_members: List[List[int]] = [
+            members[starts[i] : starts[i] + counts[i]].tolist() for i in range(len(counts))
+        ]
+        live_counts = counts.copy()
 
         victims: List[int] = []
 
-        # 2. Select solutions to eliminate by updating in-memory hypercube memberships
+        # 2. Sequential crowded-cube removal (each deletion updates densities)
         for _ in range(num_to_remove):
-            max_pop = max(len(members) for members in cubes.values() if len(members) > 0)
-            most_crowded_cids = [
-                cid for cid, members in cubes.items() if len(members) == max_pop
-            ]
-
-            chosen_cid = most_crowded_cids[np.random.randint(0, len(most_crowded_cids))]
-            victim_idx = int(np.random.choice(cubes[chosen_cid]))
-
-            # Remove from hypercube virtual membership and mark for deletion
-            cubes[chosen_cid].remove(victim_idx)
+            max_pop = int(np.max(live_counts))
+            most_crowded = np.flatnonzero(live_counts == max_pop)
+            chosen = int(most_crowded[rng.integers(0, len(most_crowded))])
+            local = int(rng.integers(0, live_counts[chosen]))
+            victim_idx = cube_members[chosen].pop(local)
+            live_counts[chosen] -= 1
             victims.append(victim_idx)
 
         # 3. Delete all victims in a single pass using boolean masking

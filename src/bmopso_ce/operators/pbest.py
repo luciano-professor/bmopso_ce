@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Tuple
 import numpy as np
 
-from bmopso_ce.util.dominance import dominates
+from bmopso_ce.util.dominance import dominates_mask
 
 __all__ = ["update_personal_bests"]
 
@@ -17,6 +17,7 @@ def update_personal_bests(
     x: np.ndarray,
     f: np.ndarray,
     cv: np.ndarray,
+    random_state: np.random.Generator | None = None,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Update personal best positions using Constrained-Dominance and Coello Coello (2004) rules.
 
@@ -40,6 +41,8 @@ def update_personal_bests(
         New objective values (n_particles, n_obj).
     cv : np.ndarray
         New constraint violations (n_particles,).
+    random_state : np.random.Generator | None, default=None
+        NumPy Generator used for incomparable pbest coin flips.
 
     Returns
     -------
@@ -52,22 +55,23 @@ def update_personal_bests(
     new_pbest_cv = (
         pbest_cv.copy() if pbest_cv is not None else np.zeros(n_particles, dtype=float)
     )
+    rng = random_state if random_state is not None else np.random.default_rng()
 
-    for i in range(n_particles):
-        f_new = f[i]
-        f_old = new_pbest_f[i]
-        cv_new = float(cv[i])
-        cv_old = float(new_pbest_cv[i])
+    cv_new = np.asarray(cv, dtype=float).reshape(-1)
+    cv_old = np.asarray(new_pbest_cv, dtype=float).reshape(-1)
 
-        if dominates(f_new, f_old, cv_new, cv_old):
-            new_pbest_x[i] = x[i].copy()
-            new_pbest_f[i] = f_new.copy()
-            new_pbest_cv[i] = cv_new
-        elif not dominates(f_old, f_new, cv_old, cv_new):
-            # Incomparable: randomly choose between current position and pbest (Coello Coello et al., 2004)
-            if np.random.rand() < 0.5:
-                new_pbest_x[i] = x[i].copy()
-                new_pbest_f[i] = f_new.copy()
-                new_pbest_cv[i] = cv_new
+    new_dominates_old = dominates_mask(f, new_pbest_f, cv_new, cv_old)
+    old_dominates_new = dominates_mask(new_pbest_f, f, cv_old, cv_new)
+    incomparable = (~new_dominates_old) & (~old_dominates_new)
+
+    replace = new_dominates_old.copy()
+    n_incomparable = int(np.count_nonzero(incomparable))
+    if n_incomparable > 0:
+        # Same RNG consumption order as the previous per-particle loop (index 0..N-1)
+        replace[incomparable] = rng.random(n_incomparable) < 0.5
+
+    new_pbest_x[replace] = x[replace]
+    new_pbest_f[replace] = f[replace]
+    new_pbest_cv[replace] = cv_new[replace]
 
     return new_pbest_x, new_pbest_f, new_pbest_cv

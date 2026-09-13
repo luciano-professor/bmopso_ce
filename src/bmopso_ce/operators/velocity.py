@@ -16,6 +16,7 @@ def update_velocity(
     c1: float = 1.49,
     c2: float = 1.49,
     v_max: float = 4.0,
+    random_state: np.random.Generator | None = None,
 ) -> np.ndarray:
     """Update particle velocities combining inertia, cognitive, and social components.
 
@@ -37,15 +38,18 @@ def update_velocity(
         Social acceleration coefficient.
     v_max : float, default=4.0
         Maximum allowable absolute velocity bound.
+    random_state : np.random.Generator | None, default=None
+        NumPy Generator used for cognitive and social random factors.
 
     Returns
     -------
     np.ndarray
         Clamped updated continuous velocity matrix.
     """
+    rng = random_state if random_state is not None else np.random.default_rng()
     n_particles, n_var = x.shape
-    r1 = np.random.rand(n_particles, n_var)
-    r2 = np.random.rand(n_particles, n_var)
+    r1 = rng.random((n_particles, n_var))
+    r2 = rng.random((n_particles, n_var))
 
     cognitive = c1 * r1 * (pbest_x.astype(float) - x.astype(float))
     social = c2 * r2 * (gbest.astype(float) - x.astype(float))

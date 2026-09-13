@@ -131,14 +131,21 @@ class BMOPSO_CE(Algorithm):
         self.stagnation_counter: int = 0
         self.n_catfish_triggers: int = 0
 
+    def _rng(self) -> np.random.Generator:
+        """Return pymoo's seeded Generator, creating one only if setup has not run yet."""
+        if self.random_state is None:
+            self.random_state = np.random.default_rng(self.seed)
+        return self.random_state
+
     def _initialize(self) -> None:
         """Initialize particle positions, velocities, personal bests, and external archive."""
         super()._initialize()
         n_var: int = self.problem.n_var
+        rng = self._rng()
 
         # 1. Random initialization of binary positions (0 or 1) and continuous velocities
-        self.X = np.random.randint(0, 2, size=(self.n_particles, n_var)).astype(bool)
-        self.V = np.random.uniform(-self.v_max, self.v_max, size=(self.n_particles, n_var))
+        self.X = rng.integers(0, 2, size=(self.n_particles, n_var)).astype(bool)
+        self.V = rng.uniform(-self.v_max, self.v_max, size=(self.n_particles, n_var))
 
         # 2. Initial evaluation of objectives and constraints via pymoo evaluator
         self.pop = Population.new(X=self.X)
@@ -160,7 +167,7 @@ class BMOPSO_CE(Algorithm):
 
         # 4. External non-dominated archive initialization
         self.archive = NonDominatedArchive(max_size=self.max_archive_size, n_grid=self.n_grid)
-        self.archive.update(self.X, f_eval, cv_1d)
+        self.archive.update(self.X, f_eval, cv_1d, random_state=rng)
 
         # 5. Initialize Catfish Effect tracking
         self.stagnation_counter = 0
@@ -176,7 +183,7 @@ class BMOPSO_CE(Algorithm):
         cv: np.ndarray | None = None,
     ) -> bool:
         """Update external archive with candidate solutions."""
-        return self.archive.update(x, f, cv)
+        return self.archive.update(x, f, cv, random_state=self._rng())
 
     def _set_optimum(self) -> None:
         """Set the optimal non-dominated solution set from the external archive."""
@@ -200,8 +207,10 @@ class BMOPSO_CE(Algorithm):
         ):
             raise RuntimeError("The algorithm must be initialized before calling _next().")
 
+        rng = self._rng()
+
         # 1. Select social leaders (gbest) via Adaptive Hypercube Grid Roulette (Coello Coello et al., 2004)
-        gbest = self.archive.select_leaders(self.n_particles)
+        gbest = self.archive.select_leaders(self.n_particles, random_state=rng)
 
         # 2. Compute linear decay of inertia weight w from w_max to w_min
         progress: float = 0.0
@@ -225,16 +234,18 @@ class BMOPSO_CE(Algorithm):
             c1=self.c1,
             c2=self.c2,
             v_max=self.v_max,
+            random_state=rng,
         )
 
         # 4. Map velocities to binary positions via sigmoid activation (Kennedy & Eberhart, 1997)
-        self.X = sample_binary_positions(self.V)
+        self.X = sample_binary_positions(self.V, random_state=rng)
 
         # 5. Apply non-linear mutation / turbulence operator (Coello Coello et al., 2004)
         self.X = apply_mutation(
             x=self.X,
             progress=progress,
             mutation_rate=self.mutation_rate,
+            random_state=rng,
         )
 
         # 6. Evaluate objectives and constraints of new positions via pymoo evaluator
@@ -258,10 +269,11 @@ class BMOPSO_CE(Algorithm):
             x=self.X,
             f=f_eval,
             cv=cv_1d,
+            random_state=rng,
         )
 
         # 8. Update external archive with new positions and constraint violations
-        archive_changed = self.archive.update(self.X, f_eval, cv_1d)
+        archive_changed = self.archive.update(self.X, f_eval, cv_1d, random_state=rng)
 
         # 8.1. Stagnation tracking on non-dominated Pareto archive
         if archive_changed:
@@ -274,6 +286,7 @@ class BMOPSO_CE(Algorithm):
             self.X = apply_catfish_effect(
                 x=self.X,
                 catfish_rate=self.catfish_rate,
+                random_state=rng,
             )
             self.stagnation_counter = 0
             self.n_catfish_triggers += 1

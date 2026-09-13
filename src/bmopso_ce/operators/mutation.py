@@ -11,6 +11,7 @@ def apply_mutation(
     x: np.ndarray,
     progress: float,
     mutation_rate: float | None = 0.5,
+    random_state: np.random.Generator | None = None,
 ) -> np.ndarray:
     """Apply non-linear mutation/turbulence operator to binary positions.
 
@@ -28,6 +29,8 @@ def apply_mutation(
         Current optimization progress in [0.0, 1.0].
     mutation_rate : float | None, default=0.5
         Bit-flip mutation rate. If None, defaults to 1 / n_var.
+    random_state : np.random.Generator | None, default=None
+        NumPy Generator used to choose particles and bits.
 
     Returns
     -------
@@ -43,8 +46,9 @@ def apply_mutation(
     exponent: float = 5.0 / pm
     p_particle_mut: float = float((1.0 - progress) ** exponent)
 
-    particle_mask = np.random.rand(n_particles) < p_particle_mut
-    bit_mask = np.random.rand(n_particles, n_var) < pm
+    rng = random_state if random_state is not None else np.random.default_rng()
+    particle_mask = rng.random(n_particles) < p_particle_mut
+    bit_mask = rng.random((n_particles, n_var)) < pm
     mutate_mask = particle_mask[:, np.newaxis] & bit_mask
 
     return np.logical_xor(x, mutate_mask)
